@@ -8,8 +8,6 @@ locals {
   build_environment = var.environment == "production" ? "production" : "development"
 }
 
-
-
 resource "azurerm_resource_group" "web_server_rg" {
   name     = var.web_server_rg
   location = var.web_server_location
@@ -36,14 +34,12 @@ resource "azurerm_subnet" "web_server_subnet" {
   address_prefix       = each.value
 }
 
-
 resource "azurerm_public_ip" "web_server_lb_public_ip" {
   name                = "${var.resource_prefix}-public-ip"
   location            = var.web_server_location
   resource_group_name = azurerm_resource_group.web_server_rg.name
   allocation_method   = "Dynamic"
   #allocation_method   = var.environment == "production" ? "Static" : "Dynamic"
-
 }
 
 resource "azurerm_network_security_group" "web_server_nsg" {
@@ -65,8 +61,7 @@ resource "azurerm_network_security_rule" "web_server_nsg_rule_rdp" {
   resource_group_name         = azurerm_resource_group.web_server_rg.name
   network_security_group_name = azurerm_network_security_group.web_server_nsg.name
   ##control resource or exposure rdp based on environment
-  ##count = var.environment == "production" ? 0 : 1
-
+ ##count = var.environment == "production" ? 0 : 1
 }
 
 resource "azurerm_network_security_rule" "web_server_nsg_rule_http" {
@@ -83,15 +78,11 @@ resource "azurerm_network_security_rule" "web_server_nsg_rule_http" {
   network_security_group_name = azurerm_network_security_group.web_server_nsg.name
   ##control resource or exposure rdp based on environment
   ##count = var.environment == "production" ? 0 : 1
-
 }
-
-
 
 resource "azurerm_subnet_network_security_group_association" "web_server_nsg" {
   network_security_group_id = azurerm_network_security_group.web_server_nsg.id
   subnet_id                 = azurerm_subnet.web_server_subnet["web-server"].id
-
 }
 
 
@@ -126,13 +117,13 @@ resource "azurerm_virtual_machine_scale_set" "web_server" {
 
     computer_name_prefix = local.web_server_name
     admin_username       = "rsatadmin"
-    admin_password       = "automation@3023"
+    admin_password       = data.azurerm_key_vault_secret.admin_password.value
 
   }
 
   os_profile_windows_config {
-
-    provision_vm_agent = true
+   provision_vm_agent = true
+   enable_automatic_upgrades = true
 
   }
 
@@ -147,8 +138,23 @@ resource "azurerm_virtual_machine_scale_set" "web_server" {
       load_balancer_backend_address_pool_ids = [azurerm_lb_backend_address_pool.web_server_lb_backend_pool.id]
 
     }
-
   }
+
+extension {
+   name                 = "${local.web_server_name}-extension"
+   publisher            = "Microsoft.Compute"
+   type                 = "CustomScriptExtension"
+   type_handler_version  = "1.10"
+
+   settings = <<SETTINGS
+
+   {
+    "fileUris" : ["https://raw.githubusercontent.com/eltimmo/learning/master/azureInstallWebServer.ps1"],
+    "commandToExecute" : "start powershell -executionpolicy Unrestricted -File azureInstallWebServer.ps1"
+   }
+   SETTINGS
+
+}
 
 }
 
@@ -190,5 +196,5 @@ resource "azurerm_lb_rule" "web_server_lb_http_rule" {
   frontend_ip_configuration_name = "${var.resource_prefix}-lb-frontend-ip"
   probe_id = azurerm_lb_probe.web_server_lb_http_probe.id
   backend_address_pool_id = azurerm_lb_backend_address_pool.web_server_lb_backend_pool.id
-
 }
+
