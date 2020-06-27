@@ -4,7 +4,7 @@ provider "azurerm" {
 }
 
 locals {
-  web_server_name  = var.environment == "production" ? "{var.web_server_name}-prd" : "${var.web_server_name}-dev"
+  web_server_name   = var.environment == "production" ? "{var.web_server_name}-prd" : "${var.web_server_name}-dev"
   build_environment = var.environment == "production" ? "production" : "development"
 }
 
@@ -12,8 +12,12 @@ resource "azurerm_resource_group" "web_server_rg" {
   name     = var.web_server_rg
   location = var.web_server_location
   tags = {
-    environment = local.build_environment
+    environment   = local.build_environment
     build-version = var.terraform_script_version
+    #lifecycle {
+    #  create_before_destroy = true
+   # }
+
   }
 
 }
@@ -61,7 +65,7 @@ resource "azurerm_network_security_rule" "web_server_nsg_rule_rdp" {
   resource_group_name         = azurerm_resource_group.web_server_rg.name
   network_security_group_name = azurerm_network_security_group.web_server_nsg.name
   ##control resource or exposure rdp based on environment
- ##count = var.environment == "production" ? 0 : 1
+  ##count = var.environment == "production" ? 0 : 1
 }
 
 resource "azurerm_network_security_rule" "web_server_nsg_rule_http" {
@@ -83,6 +87,15 @@ resource "azurerm_network_security_rule" "web_server_nsg_rule_http" {
 resource "azurerm_subnet_network_security_group_association" "web_server_nsg" {
   network_security_group_id = azurerm_network_security_group.web_server_nsg.id
   subnet_id                 = azurerm_subnet.web_server_subnet["web-server"].id
+}
+
+resource "azurerm_storage_account" "atsg" {
+  name                     = "atsg"
+  location                 = var.web_server_location
+  resource_group_name      = azurerm_resource_group.web_server_rg.name
+  account_tier = "standard"
+  account_replication_type = "LRS"
+
 }
 
 
@@ -122,8 +135,8 @@ resource "azurerm_virtual_machine_scale_set" "web_server" {
   }
 
   os_profile_windows_config {
-   provision_vm_agent = true
-   enable_automatic_upgrades = true
+    provision_vm_agent        = true
+    enable_automatic_upgrades = true
 
   }
 
@@ -132,21 +145,26 @@ resource "azurerm_virtual_machine_scale_set" "web_server" {
     primary = true
 
     ip_configuration {
-      name      = local.web_server_name
-      primary   = true
-      subnet_id = azurerm_subnet.web_server_subnet["web-server"].id
+      name                                   = local.web_server_name
+      primary                                = true
+      subnet_id                              = azurerm_subnet.web_server_subnet["web-server"].id
       load_balancer_backend_address_pool_ids = [azurerm_lb_backend_address_pool.web_server_lb_backend_pool.id]
 
     }
   }
 
-extension {
-   name                 = "${local.web_server_name}-extension"
-   publisher            = "Microsoft.Compute"
-   type                 = "CustomScriptExtension"
-   type_handler_version  = "1.10"
+  boot_diagnostics {
+    enabled     = true
+    storage_uri = azurerm_storage_account.atsg.primary_blob_endpoint
+  }
 
-   settings = <<SETTINGS
+  extension {
+    name                 = "${local.web_server_name}-extension"
+    publisher            = "Microsoft.Compute"
+    type                 = "CustomScriptExtension"
+    type_handler_version = "1.10"
+
+    settings = <<SETTINGS
 
    {
     "fileUris" : ["https://raw.githubusercontent.com/eltimmo/learning/master/azureInstallWebServer.ps1"],
@@ -154,7 +172,7 @@ extension {
    }
    SETTINGS
 
-}
+  }
 
 }
 
@@ -164,37 +182,37 @@ resource "azurerm_lb" "web_server_lb" {
   resource_group_name = azurerm_resource_group.web_server_rg.name
 
   frontend_ip_configuration {
-    name                = "${var.resource_prefix}-lb-frontend-ip"
+    name                 = "${var.resource_prefix}-lb-frontend-ip"
     public_ip_address_id = azurerm_public_ip.web_server_lb_public_ip.id
   }
 
 }
 
 resource "azurerm_lb_backend_address_pool" "web_server_lb_backend_pool" {
-   name                = "${var.resource_prefix}-lb-backend-pool"
+  name = "${var.resource_prefix}-lb-backend-pool"
   #location            = var.web_server_location
   resource_group_name = azurerm_resource_group.web_server_rg.name
-  loadbalancer_id   = azurerm_lb.web_server_lb.id
+  loadbalancer_id     = azurerm_lb.web_server_lb.id
 }
 
 resource "azurerm_lb_probe" "web_server_lb_http_probe" {
- name                = "${var.resource_prefix}-lb-http-probe"
+  name = "${var.resource_prefix}-lb-http-probe"
   #location            = var.web_server_location
   resource_group_name = azurerm_resource_group.web_server_rg.name
-  loadbalancer_id   = azurerm_lb.web_server_lb.id
-  protocol   = "tcp"
-  port       = "80"
+  loadbalancer_id     = azurerm_lb.web_server_lb.id
+  protocol            = "tcp"
+  port                = "80"
 }
 
 resource "azurerm_lb_rule" "web_server_lb_http_rule" {
-  name                = "${var.resource_prefix}-lb-http-rule"
-  resource_group_name = azurerm_resource_group.web_server_rg.name
-  loadbalancer_id   = azurerm_lb.web_server_lb.id
-  protocol   = "tcp"
-  frontend_port = "80"
-  backend_port  = "80"
+  name                           = "${var.resource_prefix}-lb-http-rule"
+  resource_group_name            = azurerm_resource_group.web_server_rg.name
+  loadbalancer_id                = azurerm_lb.web_server_lb.id
+  protocol                       = "tcp"
+  frontend_port                  = "80"
+  backend_port                   = "80"
   frontend_ip_configuration_name = "${var.resource_prefix}-lb-frontend-ip"
-  probe_id = azurerm_lb_probe.web_server_lb_http_probe.id
-  backend_address_pool_id = azurerm_lb_backend_address_pool.web_server_lb_backend_pool.id
+  probe_id                       = azurerm_lb_probe.web_server_lb_http_probe.id
+  backend_address_pool_id        = azurerm_lb_backend_address_pool.web_server_lb_backend_pool.id
 }
 

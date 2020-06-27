@@ -36,6 +36,6 @@ variable "web_server_subnets" {
 }
 
 variable "terraform_script_version" {
-    type = string
+  type = string
 
 }
